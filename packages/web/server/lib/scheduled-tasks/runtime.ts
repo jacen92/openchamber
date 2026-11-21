@@ -354,6 +354,63 @@ export const formatScheduledSessionTitle = (task: { name?: string; schedule?: { 
   return `${trimmedName}${suffix}`;
 };
 
+export const parsePayloadObject = (payload: unknown): unknown => {
+  if (payload && typeof payload === 'object') return payload;
+  if (typeof payload !== 'string') return null;
+  const trimmed = payload.trim();
+  if (!trimmed) return null;
+  try { return JSON.parse(trimmed); } catch { return null; }
+};
+
+export const resolvePayloadPath = (payloadObj: unknown, path: string): unknown => {
+  if (!payloadObj || !path) return undefined;
+  const parts = path.split('.').filter(Boolean);
+  let current: any = payloadObj;
+  for (const part of parts) {
+    if (current == null || typeof current !== 'object') return undefined;
+    current = current[part];
+  }
+  return current;
+};
+
+export const stringifyValue = (value: unknown): string => {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try { return JSON.stringify(value); } catch { return String(value); }
+};
+
+export const renderTemplateString = (template: unknown, rawPayload: string, rawTopic: string, payloadObj: unknown, payloadOverride: string | null, topicOverride: string | null): unknown => {
+  if (typeof template !== 'string') return template;
+  let result = template.replace(/\{\{\s*(payload(?:\.[a-zA-Z0-9_]+)*)\s*\}\}/g, (_match, expr) => {
+    const path = expr === 'payload' ? '' : expr.slice('payload.'.length);
+    if (!path) {
+      return (payloadOverride != null ? payloadOverride : rawPayload);
+    }
+    const value = resolvePayloadPath(payloadObj, path);
+    if (value === undefined) return '';
+    return stringifyValue(value);
+  });
+  result = result.replace(/\{\{\s*topic\s*\}\}/g, (topicOverride != null ? topicOverride : rawTopic));
+  return result;
+};
+
+export const renderMqttPrompt = (prompt: unknown, payload: unknown, topic: unknown, mqttCfg: any = {}): unknown => {
+  if (typeof prompt !== 'string') return prompt;
+  const rawPayload = payload == null ? '' : (typeof payload === 'string' ? payload : JSON.stringify(payload));
+  const rawTopic = topic == null ? '' : String(topic);
+  const payloadObj = parsePayloadObject(payload);
+  let payloadOverride: string | null = null;
+  if (typeof mqttCfg?.payloadTemplate === 'string' && mqttCfg.payloadTemplate.trim()) {
+    payloadOverride = renderTemplateString(mqttCfg.payloadTemplate, rawPayload, rawTopic, payloadObj, null, null) as string;
+  }
+  let topicOverride: string | null = null;
+  if (typeof mqttCfg?.topicTemplate === 'string' && mqttCfg.topicTemplate.trim()) {
+    topicOverride = renderTemplateString(mqttCfg.topicTemplate, rawPayload, rawTopic, payloadObj, null, null) as string;
+  }
+  return renderTemplateString(prompt, rawPayload, rawTopic, payloadObj, payloadOverride, topicOverride);
+};
+
 export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) => {
   const {
     projectConfigRuntime,
@@ -1023,63 +1080,6 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
     }
     const computedNext = computeNextRunAt(latest, base);
     scheduleFutureRun(projectID, taskID, computedNext, base);
-  };
-
-  const parsePayloadObject = (payload: unknown): unknown => {
-    if (payload && typeof payload === 'object') return payload;
-    if (typeof payload !== 'string') return null;
-    const trimmed = payload.trim();
-    if (!trimmed) return null;
-    try { return JSON.parse(trimmed); } catch { return null; }
-  };
-
-  const resolvePayloadPath = (payloadObj: unknown, path: string): unknown => {
-    if (!payloadObj || !path) return undefined;
-    const parts = path.split('.').filter(Boolean);
-    let current: any = payloadObj;
-    for (const part of parts) {
-      if (current == null || typeof current !== 'object') return undefined;
-      current = current[part];
-    }
-    return current;
-  };
-
-  const stringifyValue = (value: unknown): string => {
-    if (value == null) return '';
-    if (typeof value === 'string') return value;
-    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-    try { return JSON.stringify(value); } catch { return String(value); }
-  };
-
-  const renderTemplateString = (template: unknown, rawPayload: string, rawTopic: string, payloadObj: unknown, payloadOverride: string | null, topicOverride: string | null): unknown => {
-    if (typeof template !== 'string') return template;
-    let result = template.replace(/\{\{\s*(payload(?:\.[a-zA-Z0-9_]+)*)\s*\}\}/g, (_match, expr) => {
-      const path = expr === 'payload' ? '' : expr.slice('payload.'.length);
-      if (!path) {
-        return (payloadOverride != null ? payloadOverride : rawPayload);
-      }
-      const value = resolvePayloadPath(payloadObj, path);
-      if (value === undefined) return '';
-      return stringifyValue(value);
-    });
-    result = result.replace(/\{\{\s*topic\s*\}\}/g, (topicOverride != null ? topicOverride : rawTopic));
-    return result;
-  };
-
-  const renderMqttPrompt = (prompt: unknown, payload: unknown, topic: unknown, mqttCfg: any = {}): unknown => {
-    if (typeof prompt !== 'string') return prompt;
-    const rawPayload = payload == null ? '' : (typeof payload === 'string' ? payload : JSON.stringify(payload));
-    const rawTopic = topic == null ? '' : String(topic);
-    const payloadObj = parsePayloadObject(payload);
-    let payloadOverride: string | null = null;
-    if (typeof mqttCfg?.payloadTemplate === 'string' && mqttCfg.payloadTemplate.trim()) {
-      payloadOverride = renderTemplateString(mqttCfg.payloadTemplate, rawPayload, rawTopic, payloadObj, null, null) as string;
-    }
-    let topicOverride: string | null = null;
-    if (typeof mqttCfg?.topicTemplate === 'string' && mqttCfg.topicTemplate.trim()) {
-      topicOverride = renderTemplateString(mqttCfg.topicTemplate, rawPayload, rawTopic, payloadObj, null, null) as string;
-    }
-    return renderTemplateString(prompt, rawPayload, rawTopic, payloadObj, payloadOverride, topicOverride);
   };
 
   const runTask = async (projectID: string, taskID: string, reason: RunReason, scheduledFor?: number, triggerPayload?: unknown, triggerTopic?: unknown): Promise<ScheduledTaskRunResult> => {

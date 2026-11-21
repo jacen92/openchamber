@@ -148,6 +148,7 @@ export interface UIStore {
   openCodeStatusText: string;
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
+  isEventTasksDialogOpen: boolean;
   isArchivePageOpen: boolean;
   isIntegrationsCatalogOpen: boolean;
   archivePageOpenCount: number;
@@ -409,6 +410,7 @@ export interface UIStore {
   setOpenCodeStatusText: (text: string) => void;
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
+  setEventTasksDialogOpen: (open: boolean) => void;
   setArchivePageOpen: (open: boolean) => void;
   setIntegrationsCatalogOpen: (open: boolean) => void;
   setUsageStatsPageOpen: (open: boolean) => void;

@@ -9,6 +9,7 @@ export type ScheduledTaskDraft = {
   targetSessionId: string;
   name: string;
   enabled: boolean;
+  triggerType: 'schedule' | 'mqtt';
   schedule: {
     kind: 'daily' | 'weekly' | 'once' | 'cron';
     times: string[];
@@ -17,6 +18,17 @@ export type ScheduledTaskDraft = {
     weekdays: number[];
     timezone: string;
     cronExpression: string;
+  };
+  mqtt: {
+    topic: string;
+    qos: 0 | 1 | 2;
+    broker: string;
+    username: string;
+    password: string;
+    payloadTemplate: string;
+    topicTemplate: string;
+    handleRetained: boolean;
+    minIntervalMs: number;
   };
   execution: {
     prompt: string;
@@ -36,12 +48,12 @@ export type ScheduledTaskDraft = {
 };
 
 const normalizeDraftTimes = (task: ScheduledTask | null): string[] => {
-  if (!task) {
+  if (!task || !task.schedule) {
     return ['09:00'];
   }
-  const candidates = Array.isArray(task.schedule.times)
+  const candidates = Array.isArray(task.schedule?.times)
     ? task.schedule.times
-    : (task.schedule.time ? [task.schedule.time] : []);
+    : (task.schedule?.time ? [task.schedule.time] : []);
 
   const valid = candidates
     .filter((value) => typeof value === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(value))
@@ -67,6 +79,7 @@ export const toDraft = (
       sessionMode: 'new',
       targetSessionId: '',
       enabled: true,
+      triggerType: 'schedule',
       schedule: {
         kind: 'daily',
         times: ['09:00'],
@@ -75,6 +88,17 @@ export const toDraft = (
         weekdays: [1],
         timezone: timezoneFallback,
         cronExpression: '',
+      },
+      mqtt: {
+        topic: '',
+        qos: 0,
+        broker: '',
+        username: '',
+        password: '',
+        payloadTemplate: '',
+        topicTemplate: '',
+        handleRetained: false,
+        minIntervalMs: 0,
       },
       execution: {
         prompt: '',
@@ -99,24 +123,36 @@ export const toDraft = (
     targetSessionId: task.targetSessionId || '',
     name: task.name,
     enabled: task.enabled,
+    triggerType: task.mqtt ? 'mqtt' : 'schedule',
     schedule: {
-      kind: task.schedule.kind === 'cron'
+      kind: task.schedule?.kind === 'cron'
         ? 'cron'
-        : (task.schedule.kind === 'once'
+        : (task.schedule?.kind === 'once'
           ? 'once'
-          : (task.schedule.kind === 'weekly' ? 'weekly' : 'daily')),
+          : (task.schedule?.kind === 'weekly' ? 'weekly' : 'daily')),
       times: normalizeDraftTimes(task),
-      onceDate: typeof task.schedule.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(task.schedule.date)
+      onceDate: typeof task.schedule?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(task.schedule.date)
         ? task.schedule.date
         : getLocalDateISO(),
-      onceTime: typeof task.schedule.time === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(task.schedule.time)
+      onceTime: typeof task.schedule?.time === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(task.schedule.time)
         ? task.schedule.time
         : '09:00',
-      weekdays: Array.isArray(task.schedule.weekdays) ? task.schedule.weekdays : [1],
-      timezone: canonicalizeTimezone(task.schedule.timezone || timezoneFallback),
-      cronExpression: task.schedule.kind === 'cron' && typeof task.schedule.cron === 'string'
+      weekdays: Array.isArray(task.schedule?.weekdays) ? task.schedule?.weekdays : [1],
+      timezone: canonicalizeTimezone(task.schedule?.timezone || timezoneFallback),
+      cronExpression: task.schedule?.kind === 'cron' && typeof task.schedule?.cron === 'string'
         ? task.schedule.cron
         : '',
+    },
+    mqtt: {
+      topic: task.mqtt?.topic || '',
+      qos: (task.mqtt?.qos === 1 || task.mqtt?.qos === 2) ? task.mqtt.qos : 0,
+      broker: task.mqtt?.broker || '',
+      username: task.mqtt?.username || '',
+      password: task.mqtt?.password || '',
+      payloadTemplate: task.mqtt?.payloadTemplate || '',
+      topicTemplate: task.mqtt?.topicTemplate || '',
+      handleRetained: task.mqtt?.handleRetained === true,
+      minIntervalMs: typeof task.mqtt?.minIntervalMs === 'number' ? task.mqtt.minIntervalMs : 0,
     },
     execution: {
       prompt: task.execution.prompt,
@@ -145,6 +181,12 @@ export const validateDraft = (draft: ScheduledTaskDraft, t: (key: I18nKey, param
   }
   if (!draft.execution.prompt.trim()) {
     return t('sessions.scheduledTasks.editor.validation.promptRequired');
+  }
+  if (draft.triggerType === 'mqtt') {
+    if (!draft.mqtt.topic.trim()) {
+      return t('sessions.scheduledTasks.editor.validation.topicRequired');
+    }
+    return null;
   }
   if (!draft.execution.useDefaults && (!draft.execution.providerID.trim() || !draft.execution.modelID.trim())) {
     return t('sessions.scheduledTasks.editor.validation.modelRequired');
@@ -194,21 +236,37 @@ export const buildScheduledTaskPayload = (draft: ScheduledTaskDraft): Partial<Sc
     name: draft.name.trim(),
     targetSessionId: draft.sessionMode === 'existing' ? draft.targetSessionId : '',
     enabled: draft.enabled,
-    schedule: {
-      kind: draft.schedule.kind,
-      timezone: draft.schedule.timezone.trim(),
-      ...(draft.schedule.kind === 'cron'
-        ? { cron: draft.schedule.cronExpression.trim() }
-        : draft.schedule.kind === 'once'
-          ? {
-              date: draft.schedule.onceDate,
-              time: draft.schedule.onceTime,
-          }
-          : {
-              times: dedupeSortTimes(draft.schedule.times),
-              ...(draft.schedule.kind === 'weekly' ? { weekdays: draft.schedule.weekdays } : {}),
-            }),
-    },
+    ...(draft.triggerType === 'mqtt'
+      ? {
+          mqtt: {
+            topic: draft.mqtt.topic.trim(),
+            qos: draft.mqtt.qos,
+            ...(draft.mqtt.broker.trim() ? { broker: draft.mqtt.broker.trim() } : {}),
+            ...(draft.mqtt.username.trim() ? { username: draft.mqtt.username.trim() } : {}),
+            ...(draft.mqtt.password ? { password: draft.mqtt.password } : {}),
+            ...(draft.mqtt.payloadTemplate.trim() ? { payloadTemplate: draft.mqtt.payloadTemplate.trim() } : {}),
+            ...(draft.mqtt.topicTemplate.trim() ? { topicTemplate: draft.mqtt.topicTemplate.trim() } : {}),
+            handleRetained: draft.mqtt.handleRetained,
+            ...(draft.mqtt.minIntervalMs > 0 ? { minIntervalMs: draft.mqtt.minIntervalMs } : {}),
+          },
+        }
+      : {
+          schedule: {
+            kind: draft.schedule.kind,
+            timezone: draft.schedule.timezone.trim(),
+            ...(draft.schedule.kind === 'cron'
+              ? { cron: draft.schedule.cronExpression.trim() }
+              : draft.schedule.kind === 'once'
+                ? {
+                    date: draft.schedule.onceDate,
+                    time: draft.schedule.onceTime,
+                }
+                : {
+                    times: dedupeSortTimes(draft.schedule.times),
+                    ...(draft.schedule.kind === 'weekly' ? { weekdays: draft.schedule.weekdays } : {}),
+                  }),
+          },
+        }),
     execution: {
       prompt: draft.execution.prompt,
       ...(draft.execution.useDefaults ? { useDefaults: true } : {}),

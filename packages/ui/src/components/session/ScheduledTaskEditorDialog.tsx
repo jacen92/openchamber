@@ -178,10 +178,12 @@ export function ScheduledTaskEditorDialog(props: {
   task: ScheduledTask | null;
   projectId: string;
   scopes: ScheduledTaskScopeOption[];
+  mode?: 'scheduled' | 'event';
   onOpenChange: (open: boolean) => void;
   onSave: (draft: Partial<ScheduledTask>, projectId: string) => Promise<void>;
 }) {
   const { open, task, scopes, onOpenChange, onSave } = props;
+  const mode = props.mode ?? 'scheduled';
   const { t, locale } = useI18n();
   const [projectId, setProjectId] = React.useState(props.projectId);
   React.useEffect(() => {
@@ -232,14 +234,27 @@ export function ScheduledTaskEditorDialog(props: {
     if (!open) {
       return;
     }
-    setDraft(
-      toDraft(task, {
-        providerID: currentProviderID,
-        modelID: currentModelID,
-        variant: currentVariant,
-        agent: currentAgentName,
-      })
-    );
+    const nextDraft = toDraft(task, {
+      providerID: currentProviderID,
+      modelID: currentModelID,
+      variant: currentVariant,
+      agent: currentAgentName,
+    });
+    nextDraft.triggerType = mode === 'event' ? 'mqtt' : 'schedule';
+    if (mode === 'event' && !nextDraft.mqtt.broker.trim()) {
+      try {
+        const raw = localStorage.getItem('openchamber.mqtt.brokers');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0]?.url === 'string') {
+            nextDraft.mqtt.broker = parsed[0].url;
+            nextDraft.mqtt.username = typeof parsed[0]?.username === 'string' ? parsed[0].username : '';
+            nextDraft.mqtt.password = typeof parsed[0]?.password === 'string' ? parsed[0].password : '';
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    setDraft(nextDraft);
     setShowCommandAutocomplete(false);
     setShowFileMention(false);
     setCommandQuery('');
@@ -564,8 +579,10 @@ export function ScheduledTaskEditorDialog(props: {
     );
   }, []);
 
-  const title = task ? t('sessions.scheduledTasks.editor.title.edit') : t('sessions.scheduledTasks.editor.title.new');
-  const description = t('sessions.scheduledTasks.editor.description');
+  const title = task
+    ? t(mode === 'event' ? 'sessions.scheduledTasks.editor.title.editEvent' : 'sessions.scheduledTasks.editor.title.edit')
+    : t(mode === 'event' ? 'sessions.scheduledTasks.editor.title.newEvent' : 'sessions.scheduledTasks.editor.title.new');
+  const description = t(mode === 'event' ? 'sessions.scheduledTasks.editor.descriptionEvent' : 'sessions.scheduledTasks.editor.description');
 
   const formBody = (
     <div className="flex flex-col gap-5">
@@ -621,12 +638,84 @@ export function ScheduledTaskEditorDialog(props: {
                       id="sched-name"
                       value={draft.name}
                       onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
-                      placeholder={t('sessions.scheduledTasks.editor.taskName.placeholder')}
+                      placeholder={t(mode === 'event' ? 'sessions.scheduledTasks.editor.taskName.placeholderEvent' : 'sessions.scheduledTasks.editor.taskName.placeholder')}
                       maxLength={80}
                       className="w-full sm:max-w-[220px]"
                     />
                   </div>
 
+                  {mode === 'event' ? (
+                    <div className="flex flex-col gap-3 sm:col-span-2">
+                      <div className="flex flex-col gap-1">
+                        <FieldLabel htmlFor="sched-mqtt-topic" required>{t('sessions.scheduledTasks.editor.mqtt.topic.label')}</FieldLabel>
+                        <Input
+                          id="sched-mqtt-topic"
+                          value={draft.mqtt.topic}
+                          onChange={(event) => setDraft((prev) => ({ ...prev, mqtt: { ...prev.mqtt, topic: event.target.value } }))}
+                          placeholder="sensors/+/temperature"
+                          className="w-full font-mono"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <FieldLabel>{t('sessions.scheduledTasks.editor.mqtt.broker.label')}</FieldLabel>
+                        {(() => {
+                          let saved: Array<{ id: string; name: string; url: string; username?: string; password?: string }> = [];
+                          try {
+                            const raw = localStorage.getItem('openchamber.mqtt.brokers');
+                            if (raw) {
+                              const parsed = JSON.parse(raw);
+                              if (Array.isArray(parsed)) saved = parsed;
+                            }
+                          } catch { /* ignore */ }
+                          const matched = saved.find((b) => b.url === draft.mqtt.broker);
+                          return (
+                            <Select
+                              value={matched ? matched.id : (saved[0]?.id ?? '')}
+                              onValueChange={(value) => {
+                                const broker = saved.find((b) => b.id === value);
+                                if (broker) {
+                                  setDraft((prev) => ({ ...prev, mqtt: { ...prev.mqtt, broker: broker.url, username: broker.username || '', password: broker.password || '' } }));
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="w-full"><SelectValue placeholder={t('sessions.scheduledTasks.editor.mqtt.broker.placeholder')}>{(value) => saved.find((b) => b.id === value)?.name ?? value}</SelectValue></SelectTrigger>
+                              <SelectContent>
+                                {saved.map((b) => (
+                                  <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          );
+                        })()}
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <FieldLabel>{t('sessions.scheduledTasks.editor.mqtt.payloadTemplate.label')}</FieldLabel>
+                        <Input
+                          value={draft.mqtt.payloadTemplate}
+                          onChange={(event) => setDraft((prev) => ({ ...prev, mqtt: { ...prev.mqtt, payloadTemplate: event.target.value } }))}
+                          placeholder="{{payload}}"
+                          className="w-full"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <FieldLabel>{t('sessions.scheduledTasks.editor.mqtt.topicTemplate.label')}</FieldLabel>
+                        <Input
+                          value={draft.mqtt.topicTemplate}
+                          onChange={(event) => setDraft((prev) => ({ ...prev, mqtt: { ...prev.mqtt, topicTemplate: event.target.value } }))}
+                          placeholder="{{topic}}"
+                          className="w-full"
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 typography-meta">
+                        <input
+                          type="checkbox"
+                          checked={draft.mqtt.handleRetained}
+                          onChange={(event) => setDraft((prev) => ({ ...prev, mqtt: { ...prev.mqtt, handleRetained: event.target.checked } }))}
+                        />
+                        {t('sessions.scheduledTasks.editor.mqtt.handleRetained.label')}
+                      </label>
+                    </div>
+                  ) : (
                   <div className="flex flex-col gap-1">
                     <FieldLabel>{t('sessions.scheduledTasks.editor.scheduleType.label')}</FieldLabel>
                     <Select
@@ -663,10 +752,11 @@ export function ScheduledTaskEditorDialog(props: {
                       </SelectContent>
                     </Select>
                   </div>
+                  )}
 
                 </div>
 
-          {draft.schedule.kind === 'cron' ? (
+          {mode !== 'event' && (draft.schedule.kind === 'cron' ? (
             <CronScheduleSection draft={draft} setDraft={setDraft} locale={locale} t={t} />
           ) : draft.schedule.kind === 'once' ? (
             <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
@@ -804,7 +894,7 @@ export function ScheduledTaskEditorDialog(props: {
                 </Select>
               </div>
             </div>
-          )}
+           ))}
 
           {draft.sessionMode === 'new' && projectPath?.trim() ? (
             <div className="flex flex-col gap-1">

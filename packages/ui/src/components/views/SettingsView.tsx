@@ -29,6 +29,7 @@ import { WebSearchPage } from '@/components/sections/websearch/WebSearchPage';
 import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { McpPage } from '@/components/sections/mcp/McpPage';
+import { MqttBrokersPage } from '@/components/sections/mqtt/MqttBrokersPage';
 import { PluginsPage } from '@/components/sections/plugins';
 import { usePluginsStore } from '@/stores/usePluginsStore';
 import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
@@ -138,6 +139,7 @@ const pageOrder: SettingsPageSlug[] = [
   'behavior',
   'commands',
   'mcp',
+  'mqtt',
   'plugins',
   'magic-prompts',
   'snippets',
@@ -640,6 +642,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <CommandsPage />;
       case 'mcp':
         return <McpPage />;
+      case 'mqtt':
+        return <MqttBrokersPage />;
       case 'plugins':
         return <PluginsPage />;
       case 'skills.installed':

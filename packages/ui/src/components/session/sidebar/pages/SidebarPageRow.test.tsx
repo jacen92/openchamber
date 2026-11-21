@@ -54,7 +54,7 @@ test('the pages come in their order, each row opens its page and closes it on th
   useUIStore.getState().setOverviewFeatureAvailable(true);
   const { root, labels, row } = await renderPages();
   try {
-    expect(labels()).toEqual(['Overview', 'Issues and PRs', 'Scheduled tasks', 'Archive', 'Stats', 'Integrations catalog']);
+    expect(labels()).toEqual(['Overview', 'Issues and PRs', 'Scheduled tasks', 'Event tasks', 'Archive', 'Stats', 'Integrations catalog']);
     for (const [label, isOpen] of [
       ['Archive', () => useUIStore.getState().isArchivePageOpen],
       ['Scheduled tasks', () => useUIStore.getState().isScheduledTasksDialogOpen],

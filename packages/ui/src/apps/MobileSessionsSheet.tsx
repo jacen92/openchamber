@@ -85,6 +85,7 @@ type MobileSessionsSheetProps = {
     onOpenInstances?: () => void;
     onOpenSettings: () => void;
     onOpenScheduled: () => void;
+    onOpenEventTasks?: () => void;
     onOpenArchive: () => void;
     onOpenUsage: () => void;
     onOpenOverview?: () => void;
@@ -443,6 +444,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {footer.onOpenOverview ? pageItem('compass-3', t('overview.title'), footer.onOpenOverview) : null}
         {pageItem('git-pull-request', t('sourceBoard.title'), footer.onOpenSourceBoard)}
         {pageItem('calendar-schedule', t('sessions.sidebar.header.actions.scheduledTasks'), footer.onOpenScheduled)}
+        {pageItem('plug', t('sessions.sidebar.header.actions.eventTasks'), footer.onOpenEventTasks)}
         {pageItem('archive', t('sessions.sidebar.nav.archive'), footer.onOpenArchive)}
         {pageItem('bar-chart', t('usageStats.openAction'), footer.onOpenUsage)}
         {guestPages.map((guest) => (

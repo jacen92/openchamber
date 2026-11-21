@@ -57,6 +57,7 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'openCodeStatusText'
   | 'isSessionCreateDialogOpen'
   | 'isScheduledTasksDialogOpen'
+  | 'isEventTasksDialogOpen'
   | 'isArchivePageOpen'
   | 'isIntegrationsCatalogOpen'
   | 'archivePageOpenCount'
@@ -284,6 +285,7 @@ export const createInitialUIState = (): Pick<UIStore,
   openCodeStatusText: '',
   isSessionCreateDialogOpen: false,
   isScheduledTasksDialogOpen: false,
+  isEventTasksDialogOpen: false,
   isArchivePageOpen: false,
   isIntegrationsCatalogOpen: false,
   archivePageOpenCount: 0,

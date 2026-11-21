@@ -1,5 +1,9 @@
 # Scheduled Tasks module
 
+> MQTT-triggered tasks (tasks with an `mqtt` field instead of a `schedule`) are
+> handled by the parallel `packages/web/server/lib/mqtt/` manager, which reuses
+> this module's execution path via `runtime.triggerTask(projectID, taskID, 'mqtt', payload)`.
+
 Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 
 ## Scope

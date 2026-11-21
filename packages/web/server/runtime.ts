@@ -116,6 +116,10 @@ import { applyOwnedArchiveState } from './lib/opencode/proxy.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createReadSessionDefaults, resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
+const mqttClientModule = await import('./lib/mqtt/client.js');
+const mqttClient = mqttClientModule.default || mqttClientModule;
+const triggerManagerModule = await import('./lib/mqtt/trigger-manager.js');
+const { createMqttTriggerManager } = triggerManagerModule.default || triggerManagerModule;
 import { createChatDirectoryCleanupRuntime } from './lib/chat-directories/runtime.js';
 import { createUnregisteredScheduledWorktreeBridge } from './lib/scheduled-tasks/worktree-bridge.js';
 import { createServerStartupRuntime } from './lib/server-frame/server-startup-runtime.js';
@@ -1931,6 +1935,7 @@ const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitori
 const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
 const scheduledChatsScope = createChatsScope(OPENCHAMBER_CHATS_DIR);
 const scheduledWorktreeBridge = createUnregisteredScheduledWorktreeBridge();
+const mqttTriggerManagerRef: { current: any } = { current: null };
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
   chatsScope: scheduledChatsScope,
@@ -1964,6 +1969,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   persistSessionGoal: (sessionID, directory, goal) =>
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
   setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
+  onTasksChanged: () => { try { mqttTriggerManagerRef?.current?.reconcile?.(); } catch { /* ignore */ } },
   emitTaskRunEvent: (event) => {
     for (const client of uiOpenChamberEventClients) {
       try {
@@ -1982,6 +1988,13 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   },
   logger: console,
 });
+let mqttTriggerManager: any = null;
+try {
+  mqttTriggerManager = createMqttTriggerManager({ mqttClient, scheduledTasksRuntime, logger: console });
+  mqttTriggerManagerRef.current = mqttTriggerManager;
+} catch (error) {
+  console.warn('[mqtt-triggers] failed to initialize:', (error as any)?.message ?? error);
+}
 const emitSessionCreatedEvent = (event: SessionCreatedEvent) => {
   for (const client of uiOpenChamberEventClients) {
     try {
@@ -2912,6 +2925,7 @@ async function main(options: WebUiServerOptions = {}) {
     sessionWarmingRuntime,
     sessionTodosRuntime,
     scheduledWorktreeBridge,
+    mqttClient,
     crypto,
     fs,
     os,
@@ -3101,6 +3115,10 @@ async function main(options: WebUiServerOptions = {}) {
   } catch (error) {
     console.warn('[ScheduledTasks] Failed to start runtime:', (isRecord(error) && error.message) || error);
   }
+  try {
+    mqttTriggerManager?.reconcile?.();
+    setInterval(() => { try { mqttTriggerManager?.reconcile?.(); } catch { /* ignore */ } }, 10_000).unref?.();
+  } catch { /* ignore */ }
   memoryDreaming.start();
 
   void relayService.reconcile();

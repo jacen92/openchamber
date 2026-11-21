@@ -159,12 +159,13 @@ interface ControlTask {
   loopFile?: string;
   name: string;
   enabled: boolean;
-  schedule: TaskSchedule;
+  schedule?: TaskSchedule;
   execution: TaskExecution;
   targetSessionId?: unknown;
   runInWorktree?: unknown;
   cleanupWorktree?: unknown;
   baseBranch?: string | null;
+  mqtt?: any;
 }
 interface SessionPayload {
   directory?: string;
@@ -278,9 +279,12 @@ const buildSchedule = (input: ControlInput): TaskSchedule => {
   const weekly = asNonEmptyString(input.weekly);
   const once = asNonEmptyString(input.once);
   const cron = asNonEmptyString(input.cron);
+  const topic = asNonEmptyString(input.topic);
   const selectors = [daily, weekly, once, cron].filter(Boolean);
-  if (selectors.length !== 1) {
-    throw new OpenChamberControlError('Provide exactly one of daily, weekly, once, or cron', 400);
+  if (topic) {
+    // MQTT trigger: no time schedule required.
+  } else if (selectors.length !== 1) {
+    throw new OpenChamberControlError('Provide exactly one of daily, weekly, once, cron, or topic', 400);
   }
   const timezone = asNonEmptyString(input.timezone);
   if (daily) {
@@ -339,10 +343,22 @@ const buildScheduledTask = (input: ControlInput) => {
   }
   assertWorktreeIsolation(input, targetSessionId);
   const baseBranch = asNonEmptyString(input.baseBranch);
+  const topic = asNonEmptyString(input.topic);
   const task: ControlTask = {
     name,
     enabled: input.disabled !== true,
-    schedule: buildSchedule(input),
+    ...(topic ? {} : { schedule: buildSchedule(input) }),
+    ...(topic ? { mqtt: {
+      topic,
+      ...(input.qos === 0 || input.qos === 1 || input.qos === 2 ? { qos: input.qos } : {}),
+      ...(asNonEmptyString(input.broker) ? { broker: String(input.broker).trim() } : {}),
+      ...(asNonEmptyString(input.username) ? { username: String(input.username).trim() } : {}),
+      ...(typeof input.password === 'string' && input.password.trim() ? { password: input.password } : {}),
+      ...(asNonEmptyString(input.payloadTemplate) ? { payloadTemplate: input.payloadTemplate } : {}),
+      ...(asNonEmptyString(input.topicTemplate) ? { topicTemplate: input.topicTemplate } : {}),
+      ...(input.handleRetained === true ? { handleRetained: true } : {}),
+      ...(typeof input.minIntervalMs === 'number' ? { minIntervalMs: input.minIntervalMs } : {}),
+    } } : {}),
     execution: {
       prompt,
       ...model,
@@ -401,22 +417,39 @@ const patchScheduledTask = (existing: ControlTask & { id: string }, input: Contr
     if (!name) throw new OpenChamberControlError('name cannot be empty', 400);
   }
   const selectors = (['daily', 'weekly', 'once', 'cron'] as const).filter((key) => input[key] !== undefined);
+  const topicInput = input.topic !== undefined ? asNonEmptyString(input.topic) : undefined;
   if (selectors.length > 1 || (selectors.length === 1 && !asNonEmptyString(input[selectors[0] ?? 'daily']))) {
-    throw new OpenChamberControlError('Provide exactly one nonempty daily, weekly, once, or cron selector', 400);
+    throw new OpenChamberControlError('Provide exactly one nonempty daily, weekly, once, cron, or topic selector', 400);
   }
   const timezone = asNonEmptyString(input.timezone);
-  let schedule = selectors.length === 1
-    ? buildSchedule(input)
-    : (timezone ? { ...existing.schedule, timezone } : existing.schedule);
+  let schedule = existing.schedule;
+  if (selectors.length === 1) schedule = buildSchedule(input);
+  else if (timezone && existing.schedule) schedule = { ...existing.schedule, timezone };
+  let mqtt = existing.mqtt;
+  if (topicInput !== undefined) {
+    if (topicInput) {
+      mqtt = {
+        topic: topicInput,
+        ...(input.qos === 0 || input.qos === 1 || input.qos === 2 ? { qos: input.qos } : (existing.mqtt?.qos != null ? { qos: existing.mqtt.qos } : {})),
+        ...(asNonEmptyString(input.broker) ? { broker: String(input.broker).trim() } : (existing.mqtt?.broker ? { broker: existing.mqtt.broker } : {})),
+        ...(asNonEmptyString(input.username) ? { username: String(input.username).trim() } : (existing.mqtt?.username ? { username: existing.mqtt.username } : {})),
+        ...(typeof input.password === 'string' ? (input.password.trim() ? { password: input.password } : {}) : (existing.mqtt?.password ? { password: existing.mqtt.password } : {})),
+        ...(asNonEmptyString(input.payloadTemplate) ? { payloadTemplate: input.payloadTemplate } : (existing.mqtt?.payloadTemplate ? { payloadTemplate: existing.mqtt.payloadTemplate } : {})),
+        ...(asNonEmptyString(input.topicTemplate) ? { topicTemplate: input.topicTemplate } : (existing.mqtt?.topicTemplate ? { topicTemplate: existing.mqtt.topicTemplate } : {})),
+      };
+    } else {
+      mqtt = undefined;
+    }
+  }
   if (input.time !== undefined) {
     const time = asNonEmptyString(input.time);
     if (!time || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
       throw new OpenChamberControlError('time must be HH:mm', 400);
     }
-    if (schedule.kind === 'once') {
-      schedule = { ...schedule, time };
-    } else if (schedule.kind === 'weekly' && schedule.times.length === 1) {
-      schedule = { ...schedule, times: [time] };
+    if (schedule!.kind === 'once') {
+      schedule = { ...schedule!, time };
+    } else if (schedule!.kind === 'weekly' && schedule!.times.length === 1) {
+      schedule = { ...schedule!, times: [time] };
     } else {
       throw new OpenChamberControlError('time requires a once or single-time weekly schedule; provide an explicit schedule to replace other schedules', 400);
     }
@@ -431,9 +464,11 @@ const patchScheduledTask = (existing: ControlTask & { id: string }, input: Contr
     targetSessionId: input.targetSessionId === undefined ? existing.targetSessionId : input.targetSessionId,
     name,
     enabled: isBoolean(input.disabled) ? !input.disabled : existing.enabled,
-    schedule,
+    ...(schedule ? { schedule } : {}),
+    ...(mqtt ? { mqtt } : {}),
     execution,
   };
+
   if (input.runInWorktree !== undefined) patch.runInWorktree = input.runInWorktree;
   if (input.cleanupWorktree !== undefined) patch.cleanupWorktree = input.cleanupWorktree;
   if (input.baseBranch !== undefined) patch.baseBranch = asNonEmptyString(input.baseBranch);

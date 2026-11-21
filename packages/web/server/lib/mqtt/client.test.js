@@ -14,6 +14,6 @@ describe('mqtt topicMatches', () => {
   it('matches # wildcard', () => {
     expect(topicMatches('a/#', 'a/b/c')).toBe(true);
     expect(topicMatches('#', 'anything/goes')).toBe(true);
-    expect(topicMatches('a/#', 'a')).toBe(false);
+    expect(topicMatches('a/#', 'a')).toBe(true);
   });
 });

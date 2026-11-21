@@ -2,6 +2,7 @@ import { DateTime, IANAZone } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
 import { z } from 'zod';
 import { readProcessInstance } from '../scheduled-tasks/process-instance.js';
+import { normalizeMqttTrigger } from '../mqtt/config-normalizer.js';
 import { asNonEmptyString, isBoolean, isRecord, isString } from '../shared/object-guards.js';
 import type { promises as fsPromises } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
@@ -251,26 +252,15 @@ const normalizeSchedule = (value: ScheduledTaskInput['schedule'], existingSchedu
 
   if (kind === 'once') {
     const date = normalizeDateValue(asNonEmptyString(value.date));
-    if (!date) {
-      throw new Error('schedule.date must be YYYY-MM-DD for once schedule');
-    }
-
+    if (!date) throw new Error('schedule.date must be YYYY-MM-DD for once schedule');
     const time = normalizeTimeValue(asNonEmptyString(value.time));
-    if (!time) {
-      throw new Error('schedule.time must be HH:mm for once schedule');
-    }
-
+    if (!time) throw new Error('schedule.time must be HH:mm for once schedule');
     return { kind, date, time, timezone };
   }
 
   const cron = clampLength(asNonEmptyString(value.cron) || '', MAX_CRON_LENGTH);
-  if (!cron) {
-    throw new Error('schedule.cron is required for cron schedule');
-  }
-
-  if (!validateCronExpression(cron, timezone)) {
-    throw new Error('schedule.cron is invalid');
-  }
+  if (!cron) throw new Error('schedule.cron is required for cron schedule');
+  if (!validateCronExpression(cron, timezone)) throw new Error('schedule.cron is invalid');
 
   return { kind, cron, timezone };
 };
@@ -359,42 +349,6 @@ const normalizeState = (value: ScheduledTaskInput['state'], fallback: ScheduledT
   return state;
 };
 
-const normalizeMqttTrigger = (value: unknown, existing: ScheduledTask | null | undefined): ScheduledTask['mqtt'] | undefined => {
-  if (value == null) {
-    if (existing && existing.mqtt) return existing.mqtt;
-    return undefined;
-  }
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('mqtt must be an object');
-  }
-  const v = value as Record<string, unknown>;
-  const topic = clampLength(asNonEmptyString(v.topic) || '', 512);
-  if (!topic) throw new Error('mqtt.topic is required');
-  const qos = v.qos === 0 || v.qos === 1 || v.qos === 2 ? v.qos : 0;
-  const broker = asNonEmptyString(v.broker);
-  const username = asNonEmptyString(v.username);
-  const password = asNonEmptyString(v.password);
-  const payloadTemplate = clampLength(asNonEmptyString(v.payloadTemplate) || '', MAX_TASK_PROMPT_LENGTH);
-  const topicTemplate = clampLength(asNonEmptyString(v.topicTemplate) || '', MAX_TASK_PROMPT_LENGTH);
-  const handleRetained = v.handleRetained === true;
-  const minIntervalMs = typeof v.minIntervalMs === 'number' && Number.isFinite(v.minIntervalMs) && v.minIntervalMs >= 0
-    ? Math.floor(v.minIntervalMs)
-    : undefined;
-  const dedup = v.dedup === false ? false : true;
-  return {
-    topic,
-    qos,
-    ...(broker ? { broker } : {}),
-    ...(username ? { username } : {}),
-    ...(password ? { password } : {}),
-    ...(payloadTemplate ? { payloadTemplate } : {}),
-    ...(topicTemplate ? { topicTemplate } : {}),
-    handleRetained,
-    ...(typeof minIntervalMs === 'number' ? { minIntervalMs } : {}),
-    dedup,
-  } as ScheduledTask['mqtt'];
-};
-
 const normalizeTaskForStorage = (value: JsonValue | ScheduledTaskInput, options: NormalizeTaskOptions): ScheduledTask => {
   const {
     now,
@@ -431,14 +385,18 @@ const normalizeTaskForStorage = (value: JsonValue | ScheduledTaskInput, options:
     ? value.enabled
     : (existingTask?.enabled ?? true);
 
-  const hasMqtt = value?.mqtt !== undefined || existingTask?.mqtt;
-  const schedule = hasMqtt && !value?.schedule
-    ? (existingTask?.schedule || null)
-    : normalizeSchedule(value.schedule, existingTask?.schedule);
-  if (!schedule && !hasMqtt) {
-    throw new Error('schedule is required');
-  }
-  const mqtt = normalizeMqttTrigger(value.mqtt, existingTask);
+  const mqttProvided = value.mqtt !== undefined;
+  const scheduleProvided = value.schedule !== undefined;
+  const toMqtt = mqttProvided && !scheduleProvided;
+  const toSchedule = scheduleProvided && !mqttProvided;
+  const hasMqtt = !toSchedule && (mqttProvided || Boolean(existingTask?.mqtt));
+  const schedule = toMqtt
+    ? null
+    : normalizeSchedule(value.schedule, toSchedule ? undefined : existingTask?.schedule);
+  if (!schedule && !hasMqtt) throw new Error('schedule is required');
+  const mqtt = toSchedule
+    ? undefined
+    : normalizeMqttTrigger(value.mqtt, existingTask?.mqtt);
   const targetSessionId = asNonEmptyString(value.targetSessionId);
   if (value.targetSessionId != null && value.targetSessionId !== '' && !targetSessionId) throw new Error('targetSessionId is invalid');
   if (targetSessionId && !/^[A-Za-z0-9_-]{4,128}$/.test(targetSessionId)) throw new Error('targetSessionId is invalid');
@@ -473,15 +431,9 @@ const normalizeTaskForStorage = (value: JsonValue | ScheduledTaskInput, options:
     updatedAt: refreshUpdatedAt ? nowMs : baseState.updatedAt ?? nowMs,
   };
 
-  const storedTask: ScheduledTask = {
-    id,
-    name,
-    enabled,
-    ...(schedule ? { schedule } : {}),
-    ...(mqtt ? { mqtt } : {}),
-    execution,
-    state,
-  };
+  const storedTask: ScheduledTask = { id, name, enabled, execution, state };
+  if (schedule) storedTask.schedule = schedule;
+  if (mqtt) storedTask.mqtt = mqtt;
   if (loopFile) storedTask.loopFile = loopFile;
   if (runInWorktree) storedTask.runInWorktree = true;
   if (baseBranchRaw) storedTask.baseBranch = baseBranchRaw;

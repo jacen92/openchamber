@@ -116,10 +116,8 @@ import { applyOwnedArchiveState } from './lib/opencode/proxy.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createReadSessionDefaults, resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
-const mqttClientModule = await import('./lib/mqtt/client.js');
-const mqttClient = mqttClientModule.default || mqttClientModule;
-const triggerManagerModule = await import('./lib/mqtt/trigger-manager.js');
-const { createMqttTriggerManager } = triggerManagerModule.default || triggerManagerModule;
+import { mqttClient } from './lib/mqtt/client.js';
+import { createMqttRuntimeBridge } from './lib/mqtt/runtime-bridge.js';
 import { createChatDirectoryCleanupRuntime } from './lib/chat-directories/runtime.js';
 import { createUnregisteredScheduledWorktreeBridge } from './lib/scheduled-tasks/worktree-bridge.js';
 import { createServerStartupRuntime } from './lib/server-frame/server-startup-runtime.js';
@@ -1935,7 +1933,7 @@ const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitori
 const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
 const scheduledChatsScope = createChatsScope(OPENCHAMBER_CHATS_DIR);
 const scheduledWorktreeBridge = createUnregisteredScheduledWorktreeBridge();
-const mqttTriggerManagerRef: { current: any } = { current: null };
+const mqttRuntimeBridge = createMqttRuntimeBridge(console);
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
   chatsScope: scheduledChatsScope,
@@ -1945,9 +1943,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
   createTaskWorktree: (input) => {
     const create = scheduledWorktreeBridge.create;
-    if (!create) {
-      return Promise.reject(new Error('worktree creation is unavailable'));
-    }
+    if (!create) return Promise.reject(new Error('worktree creation is unavailable'));
     return create(input);
   },
   removeTaskWorktree: (input) => scheduledWorktreeBridge.remove(input),
@@ -1969,32 +1965,19 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   persistSessionGoal: (sessionID, directory, goal) =>
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
   setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
-  onTasksChanged: () => { try { mqttTriggerManagerRef?.current?.reconcile?.(); } catch { /* ignore */ } },
+  onTasksChanged: mqttRuntimeBridge.onTasksChanged,
   emitTaskRunEvent: (event) => {
     for (const client of uiOpenChamberEventClients) {
       try {
-        const properties: ScheduledTaskRanProperties = {
-          projectId: scheduledChatsScope.toPublicID(event.projectID),
-          taskId: event.taskID,
-          ranAt: event.ranAt,
-          status: event.status,
-        };
+        const properties: ScheduledTaskRanProperties = { projectId: scheduledChatsScope.toPublicID(event.projectID), taskId: event.taskID, ranAt: event.ranAt, status: event.status };
         if (event.sessionID) properties.sessionId = event.sessionID;
         writeSseEvent(client, { type: 'openchamber:scheduled-task-ran', properties });
-      } catch {
-        uiOpenChamberEventClients.delete(client);
-      }
+      } catch { uiOpenChamberEventClients.delete(client); }
     }
   },
   logger: console,
 });
-let mqttTriggerManager: any = null;
-try {
-  mqttTriggerManager = createMqttTriggerManager({ mqttClient, scheduledTasksRuntime, logger: console });
-  mqttTriggerManagerRef.current = mqttTriggerManager;
-} catch (error) {
-  console.warn('[mqtt-triggers] failed to initialize:', (error as any)?.message ?? error);
-}
+mqttRuntimeBridge.initialize(scheduledTasksRuntime);
 const emitSessionCreatedEvent = (event: SessionCreatedEvent) => {
   for (const client of uiOpenChamberEventClients) {
     try {
@@ -3115,10 +3098,7 @@ async function main(options: WebUiServerOptions = {}) {
   } catch (error) {
     console.warn('[ScheduledTasks] Failed to start runtime:', (isRecord(error) && error.message) || error);
   }
-  try {
-    mqttTriggerManager?.reconcile?.();
-    setInterval(() => { try { mqttTriggerManager?.reconcile?.(); } catch { /* ignore */ } }, 10_000).unref?.();
-  } catch { /* ignore */ }
+  mqttRuntimeBridge.reconcile();
   memoryDreaming.start();
 
   void relayService.reconcile();

@@ -182,14 +182,14 @@ export const validateDraft = (draft: ScheduledTaskDraft, t: (key: I18nKey, param
   if (!draft.execution.prompt.trim()) {
     return t('sessions.scheduledTasks.editor.validation.promptRequired');
   }
+  if (!draft.execution.useDefaults && (!draft.execution.providerID.trim() || !draft.execution.modelID.trim())) {
+    return t('sessions.scheduledTasks.editor.validation.modelRequired');
+  }
   if (draft.triggerType === 'mqtt') {
     if (!draft.mqtt.topic.trim()) {
       return t('sessions.scheduledTasks.editor.validation.topicRequired');
     }
     return null;
-  }
-  if (!draft.execution.useDefaults && (!draft.execution.providerID.trim() || !draft.execution.modelID.trim())) {
-    return t('sessions.scheduledTasks.editor.validation.modelRequired');
   }
 
   if (draft.schedule.kind === 'once') {
@@ -230,6 +230,22 @@ const dedupeSortTimes = (times: string[]) => {
   return Array.from(new Set(filtered)).sort((a, b) => a.localeCompare(b));
 };
 
+const buildMqttPayload = (draft: ScheduledTaskDraft): NonNullable<ScheduledTask['mqtt']> => {
+  const mqtt: NonNullable<ScheduledTask['mqtt']> = {
+    topic: draft.mqtt.topic.trim(),
+    qos: draft.mqtt.qos,
+    handleRetained: draft.mqtt.handleRetained,
+    dedup: true,
+  };
+  if (draft.mqtt.broker.trim()) mqtt.broker = draft.mqtt.broker.trim();
+  if (draft.mqtt.username.trim()) mqtt.username = draft.mqtt.username.trim();
+  if (draft.mqtt.password) mqtt.password = draft.mqtt.password;
+  if (draft.mqtt.payloadTemplate.trim()) mqtt.payloadTemplate = draft.mqtt.payloadTemplate.trim();
+  if (draft.mqtt.topicTemplate.trim()) mqtt.topicTemplate = draft.mqtt.topicTemplate.trim();
+  if (draft.mqtt.minIntervalMs > 0) mqtt.minIntervalMs = draft.mqtt.minIntervalMs;
+  return mqtt;
+};
+
 export const buildScheduledTaskPayload = (draft: ScheduledTaskDraft): Partial<ScheduledTask> => {
   const payload: Partial<ScheduledTask> = {
     ...(draft.id ? { id: draft.id } : {}),
@@ -238,17 +254,7 @@ export const buildScheduledTaskPayload = (draft: ScheduledTaskDraft): Partial<Sc
     enabled: draft.enabled,
     ...(draft.triggerType === 'mqtt'
       ? {
-          mqtt: {
-            topic: draft.mqtt.topic.trim(),
-            qos: draft.mqtt.qos,
-            ...(draft.mqtt.broker.trim() ? { broker: draft.mqtt.broker.trim() } : {}),
-            ...(draft.mqtt.username.trim() ? { username: draft.mqtt.username.trim() } : {}),
-            ...(draft.mqtt.password ? { password: draft.mqtt.password } : {}),
-            ...(draft.mqtt.payloadTemplate.trim() ? { payloadTemplate: draft.mqtt.payloadTemplate.trim() } : {}),
-            ...(draft.mqtt.topicTemplate.trim() ? { topicTemplate: draft.mqtt.topicTemplate.trim() } : {}),
-            handleRetained: draft.mqtt.handleRetained,
-            ...(draft.mqtt.minIntervalMs > 0 ? { minIntervalMs: draft.mqtt.minIntervalMs } : {}),
-          },
+          mqtt: buildMqttPayload(draft),
         }
       : {
           schedule: {

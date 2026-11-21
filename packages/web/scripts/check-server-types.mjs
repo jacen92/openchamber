@@ -20,9 +20,6 @@ export const JAVASCRIPT_ENTRIES = [
   'server/lib/git/credential-helper.js',
   'server/lib/git/repository-credential-helper.js',
   'server/lib/git/ssh-wrapper.js',
-  'server/lib/mqtt/client.js',
-  'server/lib/mqtt/routes.js',
-  'server/lib/mqtt/trigger-manager.js',
 ];
 
 const NOT_IMPLEMENTATION = /(?:\.(?:test|spec|fixture|test-support|bench)\.|(?:^|\/)(?:tests?|__tests__|test-support)(?:\/|$)|-live-support\.)/;

@@ -25,10 +25,7 @@
     "server/lib/dictation/local/worker-process.js",
     "server/lib/git/credential-helper.js",
     "server/lib/git/repository-credential-helper.js",
-    "server/lib/git/ssh-wrapper.js",
-    "server/lib/mqtt/client.js",
-    "server/lib/mqtt/routes.js",
-    "server/lib/mqtt/trigger-manager.js"
+    "server/lib/git/ssh-wrapper.js"
   ],
   "exclude": [
     "**/*.d.ts",

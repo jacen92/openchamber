@@ -6,30 +6,12 @@ import { useI18n } from '@/lib/i18n';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-
-type Broker = { id: string; name: string; url: string; username: string; password: string };
-
-const STORAGE_KEY = 'openchamber.mqtt.brokers';
-
-const loadBrokers = (): Broker[] => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveBrokers = (brokers: Broker[]) => {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(brokers)); } catch { /* ignore */ }
-  try { window.dispatchEvent(new Event('openchamber:mqtt-brokers-changed')); } catch { /* ignore */ }
-};
+import { readMqttBrokers, writeMqttBrokers } from '@/lib/mqttBrokers';
+import { generateUuid } from '@/lib/uuid';
 
 export function MqttBrokersPage() {
   const { t } = useI18n();
-  const [brokers, setBrokers] = React.useState<Broker[]>(() => loadBrokers());
+  const [brokers, setBrokers] = React.useState(() => readMqttBrokers());
   const [name, setName] = React.useState('');
   const [url, setUrl] = React.useState('mqtt://localhost:1883');
   const [username, setUsername] = React.useState('');
@@ -60,9 +42,9 @@ export function MqttBrokersPage() {
 
   const add = () => {
     if (!url.trim()) { toast.error(t('settings.mqtt.toast.urlRequired')); return; }
-    const next = [...brokers, { id: crypto.randomUUID(), name: name.trim() || url.trim(), url: url.trim(), username: username.trim(), password }];
+    const next = [...brokers, { id: generateUuid(), name: name.trim() || url.trim(), url: url.trim(), username: username.trim(), password }];
     setBrokers(next);
-    saveBrokers(next);
+    writeMqttBrokers(next);
     setName(''); setUrl('mqtt://localhost:1883'); setUsername(''); setPassword('');
     toast.success(t('settings.mqtt.toast.saved'));
   };
@@ -70,7 +52,7 @@ export function MqttBrokersPage() {
   const remove = (id: string) => {
     const next = brokers.filter((b) => b.id !== id);
     setBrokers(next);
-    saveBrokers(next);
+    writeMqttBrokers(next);
   };
 
   return (
@@ -96,6 +78,7 @@ export function MqttBrokersPage() {
         <div className="flex flex-col gap-2">
           <Input placeholder={t('settings.mqtt.field.name')} value={name} onChange={(e) => setName(e.target.value)} />
           <Input placeholder={t('settings.mqtt.field.url')} value={url} onChange={(e) => setUrl(e.target.value)} />
+          <p className="typography-micro text-muted-foreground">{t('settings.mqtt.field.url.hint')}</p>
           <Input placeholder={t('settings.mqtt.field.username')} value={username} onChange={(e) => setUsername(e.target.value)} />
           <Input placeholder={t('settings.mqtt.field.password')} type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           <div className="flex gap-2">

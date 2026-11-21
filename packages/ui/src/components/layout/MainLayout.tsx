@@ -50,7 +50,7 @@ const loadProjectActionsDialog = () => import('./ProjectActionsDialog').then((m)
 const loadOpenCodeStatusDialog = () => import('../ui/OpenCodeStatusDialog').then((m) => m.OpenCodeStatusDialog);
 const loadRunOverview = () => import('@/components/multirun/RunOverview').then((m) => m.RunOverview);
 const loadScheduledTasksDialog = () => import('@/components/session/ScheduledTasksDialog').then((m) => m.ScheduledTasksDialog);
-const loadEventTasksDialog = () => import('@/components/session/ScheduledTasksDialog').then((m) => m.EventTasksDialog);
+const loadEventTasksDialog = () => import('@/components/session/EventTasksDialog').then((m) => m.EventTasksDialog);
 const loadArchiveView = () => import('@/components/views/ArchiveView').then((m) => m.ArchiveView);
 const loadIntegrationsCatalogView = () => import('@/components/views/IntegrationsCatalogView').then((m) => m.IntegrationsCatalogView);
 const loadUsageStatsView = () => import('@/components/views/usage/UsageStatsView').then((m) => m.UsageStatsView);

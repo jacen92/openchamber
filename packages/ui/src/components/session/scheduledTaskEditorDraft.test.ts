@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { buildScheduledTaskPayload, toDraft, validateDraft, type ScheduledTaskDraft } from './scheduledTaskEditorDraft';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
+import type { I18nKey } from '@/lib/i18n';
 
 const defaults = { providerID: 'provider-x', modelID: 'model-x', variant: '', agent: '' };
 
@@ -139,7 +140,20 @@ describe('scheduledTaskEditorDraft mqtt', () => {
     draft.triggerType = 'mqtt';
     draft.name = 't';
     draft.execution.prompt = 'p';
-    const t = (key: string) => key;
-    expect(validateDraft(draft, t as any)).toBeTruthy();
+    const t = (key: I18nKey) => key;
+    expect(validateDraft(draft, t)).toBeTruthy();
+  });
+
+  test('validates the selected model before its trigger', () => {
+    const draft = toDraft(null, defaults);
+    draft.triggerType = 'mqtt';
+    draft.name = 't';
+    draft.execution.prompt = 'p';
+    draft.execution.useDefaults = false;
+    draft.execution.providerID = '';
+    draft.execution.modelID = '';
+    draft.mqtt.topic = 'events/#';
+    const t = (key: I18nKey) => key;
+    expect(validateDraft(draft, t)).toBe('sessions.scheduledTasks.editor.validation.modelRequired');
   });
 });

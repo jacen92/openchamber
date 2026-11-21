@@ -1,6 +1,7 @@
 import React from 'react';
 import type { IconName } from '@/components/icon/icons';
 import { useGuestPages } from '@/hooks/useGuestSurfaces';
+import { useHasMqttBrokers } from '@/hooks/useHasMqttBrokers';
 import { useI18n } from '@/lib/i18n';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
@@ -39,32 +40,7 @@ export const useSidebarPages = (enabled: boolean): readonly SidebarPage[] => {
   const isSourceBoardOpen = useUIStore((state) => state.isSourceBoardOpen);
   const isScheduledOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const isEventTasksOpen = useUIStore((state) => state.isEventTasksDialogOpen);
-  const [hasMqttBrokers, setHasMqttBrokers] = React.useState<boolean>(() => {
-    try {
-      const raw = localStorage.getItem('openchamber.mqtt.brokers');
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) && parsed.length > 0;
-    } catch {
-      return false;
-    }
-  });
-  React.useEffect(() => {
-    const update = () => {
-      try {
-        const raw = localStorage.getItem('openchamber.mqtt.brokers');
-        const parsed = raw ? JSON.parse(raw) : [];
-        setHasMqttBrokers(Array.isArray(parsed) && parsed.length > 0);
-      } catch {
-        setHasMqttBrokers(false);
-      }
-    };
-    window.addEventListener('storage', update);
-    window.addEventListener('openchamber:mqtt-brokers-changed', update);
-    return () => {
-      window.removeEventListener('storage', update);
-      window.removeEventListener('openchamber:mqtt-brokers-changed', update);
-    };
-  }, []);
+  const hasMqttBrokers = useHasMqttBrokers();
   const isArchiveOpen = useUIStore((state) => state.isArchivePageOpen);
   const isUsageOpen = useUIStore((state) => state.isUsageStatsPageOpen);
   const isIntegrationsCatalogOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);

@@ -681,7 +681,7 @@ export const dict = {
   'settings.mqtt.section.add': 'Add broker',
   'settings.mqtt.empty': 'No brokers saved yet.',
   'settings.mqtt.field.name': 'Name',
-  'settings.mqtt.field.url': 'Broker URL (mqtt://host:port)',
+  'settings.mqtt.field.url': 'Broker URL',
   'settings.mqtt.field.username': 'Username (optional)',
   'settings.mqtt.field.password': 'Password (optional)',
   'settings.mqtt.action.add': 'Add broker',
@@ -4084,6 +4084,8 @@ export const dict = {
   'chat.promptHistorySearch.attachmentsPlural': "{count} attachments",
   'chat.promptHistorySearch.hint': "↑ ↓ to browse · Enter to load · Esc to close",
   'helpDialog.item.searchPromptHistory': "Search prompt history (chat input)",
+
+  'settings.mqtt.field.url.hint': 'Accepts mqtt://, mqtts://, ws:// and wss://. Include the WebSocket path when the broker uses one.',
 
 } as const;
 

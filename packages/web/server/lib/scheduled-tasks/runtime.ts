@@ -12,6 +12,8 @@ import { stat } from 'node:fs/promises';
 import { readProcessInstance as readProcessInstanceDefault } from './process-instance.js';
 import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 import { controlErrorFields } from '../openchamber-control/error.js';
+import { createMqttTaskRuntime } from '../mqtt/task-runtime.js';
+import type { JsonValue } from '../shared/json-values.js';
 import type { ExistingSessionDependencies, ExistingSessionTaskRunEvent } from './existing-session.js';
 import type { ScheduledTask, ScheduledTaskInput, ScheduledTaskStore, ScheduledWorktreeCleanup, ScheduledTaskStateResult } from '../projects/contracts.js';
 import type { ScheduledWorktree, ScheduledWorktreeBridge, RemoveScheduledWorktreeInput } from './worktree-bridge.js';
@@ -354,63 +356,6 @@ export const formatScheduledSessionTitle = (task: { name?: string; schedule?: { 
   return `${trimmedName}${suffix}`;
 };
 
-export const parsePayloadObject = (payload: unknown): unknown => {
-  if (payload && typeof payload === 'object') return payload;
-  if (typeof payload !== 'string') return null;
-  const trimmed = payload.trim();
-  if (!trimmed) return null;
-  try { return JSON.parse(trimmed); } catch { return null; }
-};
-
-export const resolvePayloadPath = (payloadObj: unknown, path: string): unknown => {
-  if (!payloadObj || !path) return undefined;
-  const parts = path.split('.').filter(Boolean);
-  let current: any = payloadObj;
-  for (const part of parts) {
-    if (current == null || typeof current !== 'object') return undefined;
-    current = current[part];
-  }
-  return current;
-};
-
-export const stringifyValue = (value: unknown): string => {
-  if (value == null) return '';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  try { return JSON.stringify(value); } catch { return String(value); }
-};
-
-export const renderTemplateString = (template: unknown, rawPayload: string, rawTopic: string, payloadObj: unknown, payloadOverride: string | null, topicOverride: string | null): unknown => {
-  if (typeof template !== 'string') return template;
-  let result = template.replace(/\{\{\s*(payload(?:\.[a-zA-Z0-9_]+)*)\s*\}\}/g, (_match, expr) => {
-    const path = expr === 'payload' ? '' : expr.slice('payload.'.length);
-    if (!path) {
-      return (payloadOverride != null ? payloadOverride : rawPayload);
-    }
-    const value = resolvePayloadPath(payloadObj, path);
-    if (value === undefined) return '';
-    return stringifyValue(value);
-  });
-  result = result.replace(/\{\{\s*topic\s*\}\}/g, (topicOverride != null ? topicOverride : rawTopic));
-  return result;
-};
-
-export const renderMqttPrompt = (prompt: unknown, payload: unknown, topic: unknown, mqttCfg: any = {}): unknown => {
-  if (typeof prompt !== 'string') return prompt;
-  const rawPayload = payload == null ? '' : (typeof payload === 'string' ? payload : JSON.stringify(payload));
-  const rawTopic = topic == null ? '' : String(topic);
-  const payloadObj = parsePayloadObject(payload);
-  let payloadOverride: string | null = null;
-  if (typeof mqttCfg?.payloadTemplate === 'string' && mqttCfg.payloadTemplate.trim()) {
-    payloadOverride = renderTemplateString(mqttCfg.payloadTemplate, rawPayload, rawTopic, payloadObj, null, null) as string;
-  }
-  let topicOverride: string | null = null;
-  if (typeof mqttCfg?.topicTemplate === 'string' && mqttCfg.topicTemplate.trim()) {
-    topicOverride = renderTemplateString(mqttCfg.topicTemplate, rawPayload, rawTopic, payloadObj, null, null) as string;
-  }
-  return renderTemplateString(prompt, rawPayload, rawTopic, payloadObj, payloadOverride, topicOverride);
-};
-
 export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) => {
   const {
     projectConfigRuntime,
@@ -436,7 +381,6 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
     resolvePrimaryWorktreeRoot,
     isSessionArchived,
     logger = console,
-    onTasksChanged = () => {},
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
     maxRunDurationMs = DEFAULT_MAX_RUN_MS,
@@ -504,6 +448,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
   const runningCountByProject = new Map<string, number>();
   let runningGlobalCount = 0;
   const queue: { projectID: string; taskID: string; reason: RunReason; scheduledFor?: number }[] = [];
+  const mqttTaskRuntime = createMqttTaskRuntime({ tasksByProject, runningTaskKeys, queuedTaskKeys, buildTaskKey, runTask: (...args) => runTask(...args) });
 
   const clearTimerForKey = (taskKey: string) => {
     const timer = timersByTaskKey.get(taskKey);
@@ -645,7 +590,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
       await syncTaskSchedule(projectID, task);
     }
 
-    try { onTasksChanged(); } catch { /* ignore */ }
+    try { deps.onTasksChanged?.(); } catch (error) { void error; }
     return tasks;
   };
 
@@ -1082,17 +1027,11 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
     scheduleFutureRun(projectID, taskID, computedNext, base);
   };
 
-  const runTask = async (projectID: string, taskID: string, reason: RunReason, scheduledFor?: number, triggerPayload?: unknown, triggerTopic?: unknown): Promise<ScheduledTaskRunResult> => {
+  const runTask = async (projectID: string, taskID: string, reason: RunReason, scheduledFor?: number, triggerPayload?: JsonValue, triggerTopic?: string): Promise<ScheduledTaskRunResult> => {
     const taskMap = tasksByProject.get(projectID);
     const task = taskMap?.get(taskID);
-    if (!task || (reason !== 'manual' && !task.enabled)) {
-      return { ok: false, skipped: true };
-    }
-
-    const effectiveTask = (reason === 'mqtt' && triggerPayload !== undefined)
-      ? ({ ...task, execution: { ...task.execution, prompt: renderMqttPrompt(task.execution?.prompt, triggerPayload, triggerTopic, task.mqtt) as string } } as ScheduledTask)
-      : task;
-
+    if (!task || (reason !== 'manual' && !task.enabled)) return { ok: false, skipped: true };
+    const effectiveTask = mqttTaskRuntime.renderEffectiveTask(task, reason, triggerPayload, triggerTopic);
     if (task.targetSessionId) {
       if (!existingSessionTasks) return { ok: false, error: 'Existing-session scheduling is unavailable', statusCode: 503 };
       const nextRunAt = computeNextRunAt(task, Math.max(Date.now(), (scheduledFor ?? 0) + 1));
@@ -1103,11 +1042,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
             const consumed = await projectConfigRuntime.upsertScheduledTask(projectID, { ...result.task, enabled: false });
             updateInMemoryTask(projectID, consumed.task);
           } catch (consumeError) {
-            logger.warn?.('[ScheduledTasks] failed to consume one-time task', {
-              projectID,
-              taskID,
-              error: safeErrorMessage(consumeError),
-            });
+            logger.warn?.('[ScheduledTasks] failed to consume one-time task', { projectID, taskID, error: safeErrorMessage(consumeError) });
           }
         } else scheduleFutureRun(projectID, taskID, nextRunAt);
       }
@@ -1296,7 +1231,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
       };
 
       try {
-        const runPromise = runTaskWithWatchdog(projectID, effectiveTask as ScheduledTask, reason, recordCreatedSession);
+        const runPromise = runTaskWithWatchdog(projectID, effectiveTask, reason, recordCreatedSession);
         let timeoutID: ReturnType<typeof setTimeout> | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => {
           timeoutID = setTimeout(() => {
@@ -1576,27 +1511,6 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
     queue.length = 0;
   };
 
-  const triggerTask = async (projectID: string, taskID: string, reason: RunReason = 'mqtt', payload?: unknown, topic?: unknown) => {
-    const taskKey = buildTaskKey(projectID, taskID);
-    if (runningTaskKeys.has(taskKey)) {
-      return { ok: false, running: true, error: 'task is already running' };
-    }
-    if (queuedTaskKeys.has(taskKey)) {
-      return { ok: false, queued: true, error: 'task is already queued' };
-    }
-    return runTask(projectID, taskID, reason, undefined, payload, topic);
-  };
-
-  const listMqttTasks = () => {
-    const result = [];
-    for (const [projectID, taskMap] of tasksByProject.entries()) {
-      for (const task of taskMap.values()) {
-        if (task?.mqtt) result.push({ projectID, task });
-      }
-    }
-    return result;
-  };
-
   const getStatus = () => {
     let enabledCount = 0;
     for (const taskMap of tasksByProject.values()) {
@@ -1622,8 +1536,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
     syncAllProjects,
     syncProject,
     runNow,
-    triggerTask,
-    listMqttTasks,
+    triggerTask: mqttTaskRuntime.triggerTask, listMqttTasks: mqttTaskRuntime.listMqttTasks,
     getStatus,
     validateTarget: (...args: Parameters<ReturnType<typeof createExistingSessionTasks>['validateTarget']>) => {
       if (!existingSessionTasks) throw new TypeError("Cannot read properties of null (reading 'validateTarget')");

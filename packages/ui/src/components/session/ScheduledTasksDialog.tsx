@@ -43,7 +43,8 @@ import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { createTaskRequestGate, mayCommitTaskList, mayEndTaskLoad } from './scheduledTasksRequests';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { formatSchedule } from './scheduledTaskSchedule';
+import { filterTasksByMode, formatTaskSummary } from './scheduledTaskViewHelpers';
+import { ScheduledTaskRunNowButton } from './ScheduledTaskRunNowButton';
 
 
 const TaskModelLine: React.FC<{ task: ScheduledTask }> = ({ task }) => {
@@ -165,9 +166,7 @@ const toneStyle = (tone: StatusTone): React.CSSProperties => {
 export type ScheduledTasksLeaveReason = 'session' | 'file';
 
 export function ScheduledTasksView({ layout, onLeave, mode = 'scheduled' }: {
-  layout: 'page' | 'mobile';
-  onLeave: (reason: ScheduledTasksLeaveReason) => void;
-  mode?: 'scheduled' | 'event';
+  layout: 'page' | 'mobile'; onLeave: (reason: ScheduledTasksLeaveReason) => void; mode?: 'scheduled' | 'event';
 }) {
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
@@ -237,10 +236,7 @@ export function ScheduledTasksView({ layout, onLeave, mode = 'scheduled' }: {
       return;
     }
     listOwnerRef.current = projectID;
-    const filtered = mode === 'event'
-      ? nextTasks.filter((task) => Boolean(task.mqtt))
-      : nextTasks.filter((task) => !task.mqtt);
-    setTasks(filtered);
+    setTasks(filterTasksByMode(nextTasks, mode));
   }, [mode]);
 
   const reloadTasks = React.useCallback(async (projectID: string, options?: { silent?: boolean }) => {
@@ -586,9 +582,7 @@ export function ScheduledTasksView({ layout, onLeave, mode = 'scheduled' }: {
                     {task.name}
                   </div>
                   <div className="typography-micro truncate text-muted-foreground">
-                    {task.mqtt
-                      ? t('sessions.scheduledTasks.dialog.mqttSummary', { topic: task.mqtt.topic || '—', broker: task.mqtt.broker || '' })
-                      : formatSchedule(task.schedule, t)}
+                    {formatTaskSummary(task, t)}
                   </div>
                   <div className="typography-micro flex min-w-0 items-center gap-1 text-muted-foreground" title={task.execution.useDefaults ? undefined : `${task.execution.providerID ?? ''}/${task.execution.modelID ?? ''}`}>
                     <TaskModelLine task={task} />
@@ -700,16 +694,7 @@ export function ScheduledTasksView({ layout, onLeave, mode = 'scheduled' }: {
                         <Icon name="chat-1" className="h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.openSession')}
                       </Button>
                     ) : null}
-                    {!task.mqtt ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleRunNow(task)}
-                      disabled={isBusy}
-                    >
-                      <Icon name="play" className="h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.runNow')}
-                    </Button>
-                    ) : null}
+                    {!task.mqtt ? <ScheduledTaskRunNowButton disabled={isBusy} onRun={() => void handleRunNow(task)} /> : null}
                     <Button
                       variant="outline"
                       size="sm"
@@ -808,9 +793,3 @@ export function ScheduledTasksDialog() {
   return open ? <ScheduledTasksView layout="page" mode="scheduled" onLeave={leave} /> : null;
 }
 
-export function EventTasksDialog() {
-  const open = useUIStore((state) => state.isEventTasksDialogOpen);
-  const setOpen = useUIStore((state) => state.setEventTasksDialogOpen);
-  const leave = React.useCallback(() => setOpen(false), [setOpen]);
-  return open ? <ScheduledTasksView layout="page" mode="event" onLeave={leave} /> : null;
-}

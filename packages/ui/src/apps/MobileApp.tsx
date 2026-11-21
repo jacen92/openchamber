@@ -84,7 +84,8 @@ import { UsageStatsView } from '@/components/views/usage/UsageStatsView';
 import { ArchiveSessionsView } from '@/components/views/ArchiveView';
 import { MobileSourceBoard } from '@/components/sourceBoard/SourceBoardView';
 import { OverviewPage } from '@/components/overview/OverviewView';
-import { ScheduledTasksView, type ScheduledTasksLeaveReason } from '@/components/session/ScheduledTasksDialog';
+import type { ScheduledTasksLeaveReason } from '@/components/session/ScheduledTasksDialog';
+import { MobileTasksSurface } from './MobileTasksSurface';
 import { MobileWorkspaceDrawer } from './MobileWorkspaceDrawer';
 import type { MobileChangesCommitRequest } from './mobileChangesCommitRequest';
 import { connectMobileWorkspaceOpener, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
@@ -778,33 +779,11 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         ) : null}
 
         {activeSurface === 'scheduled' ? (
-          <MobileFullscreenSurface
-            open
-            variant={surfaceVariant}
-            dialogAlign="app"
-            onClose={closeSurface}
-            ariaLabel={t('sessions.scheduledTasks.dialog.title')}
-            title={t('sessions.scheduledTasks.dialog.title')}
-          >
-            <ErrorBoundary>
-              <ScheduledTasksView layout="mobile" onLeave={leaveScheduledTasks} />
-            </ErrorBoundary>
-          </MobileFullscreenSurface>
+          <MobileTasksSurface mode="scheduled" variant={surfaceVariant} onClose={closeSurface} onLeave={leaveScheduledTasks} />
         ) : null}
 
         {activeSurface === 'event-tasks' ? (
-          <MobileFullscreenSurface
-            open
-            variant={surfaceVariant}
-            dialogAlign="app"
-            onClose={closeSurface}
-            ariaLabel={t('sessions.sidebar.header.actions.eventTasks')}
-            title={t('sessions.sidebar.header.actions.eventTasks')}
-          >
-            <ErrorBoundary>
-              <ScheduledTasksView layout="mobile" mode="event" onLeave={leaveScheduledTasks} />
-            </ErrorBoundary>
-          </MobileFullscreenSurface>
+          <MobileTasksSurface mode="event" variant={surfaceVariant} onClose={closeSurface} onLeave={leaveScheduledTasks} />
         ) : null}
 
         {activeSurface === 'board' ? (

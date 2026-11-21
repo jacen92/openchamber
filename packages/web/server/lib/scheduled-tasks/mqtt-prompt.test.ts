@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderMqttPrompt } from './runtime.js';
+import { renderMqttPrompt } from '../mqtt/prompt.js';
 
 describe('renderMqttPrompt', () => {
   it('replaces {{payload}} with string payload', () => {
@@ -29,6 +29,6 @@ describe('renderMqttPrompt', () => {
     expect(renderMqttPrompt('p={{payload}}', { n: 1 }, 't')).toBe('p={"n":1}');
   });
   it('returns non-string prompt unchanged', () => {
-    expect(renderMqttPrompt(42 as any, 'p', 't')).toBe(42);
+    expect(renderMqttPrompt(42, 'p', 't')).toBe(42);
   });
 });
